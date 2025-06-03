@@ -266,7 +266,7 @@ if "selected_devices" not in st.session_state:
 if "models_info" not in st.session_state:
     st.session_state.models_info = {}
 if "enhanced_prompts" not in st.session_state:
-    st.session_state.enhanced_prompts = load_enhanced_prompts(None)
+    st.session_state.enhanced_prompts = load_enhanced_prompts("")
 if "performance_test" not in st.session_state:
     st.session_state.performance_test = PerformanceTest()
 if "test_running" not in st.session_state:
@@ -858,95 +858,127 @@ with tab4:
         # Performance comparison
         st.subheader("🏆 Performance Comparison")
         
-        # Create performance comparison data
-        comparison_data = []
+        # Aggregate performance data by device
+        device_aggregates = {}
+        
         for result in st.session_state.results:
             if result['results']['performance_stats']:
+                device_name = result['device_info']['device_name']
                 stats = result['results']['performance_stats']
-                comparison_data.append({
-                    'Device': result['device_info']['device_name'],
-                    'Model': result['test_config']['model'],
-                    'Tokens/sec': stats['tokens_per_second']['mean'],
-                    'TTFT (ms)': stats['ttft_ms']['mean'],
-                    'Total Duration (s)': stats['total_duration_s']['mean'],
-                    'Success Rate (%)': result['results']['success_rate'],
-                    'Iterations': result['test_config']['iterations']
-                })
+                
+                if device_name not in device_aggregates:
+                    device_aggregates[device_name] = {
+                        'tokens_per_sec': [],
+                        'ttft_ms': [],
+                        'total_duration_s': [],
+                        'success_rates': [],
+                        'test_count': 0,
+                        'model': result['test_config']['model']  # Use the last model tested
+                    }
+                
+                device_aggregates[device_name]['tokens_per_sec'].append(stats['tokens_per_second']['mean'])
+                device_aggregates[device_name]['ttft_ms'].append(stats['ttft_ms']['mean'])
+                device_aggregates[device_name]['total_duration_s'].append(stats['total_duration_s']['mean'])
+                device_aggregates[device_name]['success_rates'].append(result['results']['success_rate'])
+                device_aggregates[device_name]['test_count'] += 1
+        
+        # Create aggregated comparison data
+        comparison_data = []
+        for device_name, data in device_aggregates.items():
+            comparison_data.append({
+                'Device': device_name,
+                'Model': data['model'],
+                'Avg Tokens/sec': sum(data['tokens_per_sec']) / len(data['tokens_per_sec']),
+                'Avg TTFT (ms)': sum(data['ttft_ms']) / len(data['ttft_ms']),
+                'Avg Duration (s)': sum(data['total_duration_s']) / len(data['total_duration_s']),
+                'Avg Success Rate (%)': sum(data['success_rates']) / len(data['success_rates']),
+                'Tests Completed': data['test_count'],
+                'Min Tokens/sec': min(data['tokens_per_sec']),
+                'Max Tokens/sec': max(data['tokens_per_sec']),
+                'Tokens/sec StdDev': (sum((x - sum(data['tokens_per_sec'])/len(data['tokens_per_sec']))**2 for x in data['tokens_per_sec']) / len(data['tokens_per_sec']))**0.5
+            })
         
         if comparison_data:
             comparison_df = pd.DataFrame(comparison_data)
             
-            # Display table
-            st.dataframe(comparison_df, use_container_width=True)
+            # Display aggregated table
+            st.write("**Device Performance Summary (Averaged Across All Tests)**")
+            display_columns = ['Device', 'Model', 'Avg Tokens/sec', 'Avg TTFT (ms)', 'Avg Success Rate (%)', 'Tests Completed']
+            st.dataframe(comparison_df[display_columns], use_container_width=True)
             
-            # Performance charts
+            # Show detailed stats in expander
+            with st.expander("📊 Detailed Statistics"):
+                detailed_columns = ['Device', 'Min Tokens/sec', 'Max Tokens/sec', 'Tokens/sec StdDev', 'Avg Duration (s)']
+                st.dataframe(comparison_df[detailed_columns], use_container_width=True)
+            
+            # Performance charts using averaged data
             col1, col2 = st.columns(2)
             
             with col1:
-                # Tokens per second comparison
-                # Calculate max value for proper color scaling
-                max_tokens = comparison_df['Tokens/sec'].max()
+                # Average Tokens per second comparison
+                max_tokens = comparison_df['Avg Tokens/sec'].max()
                 fig_tokens = px.bar(
                     comparison_df,
                     x='Device',
-                    y='Tokens/sec',
-                    title='Tokens per Second by Device',
-                    color='Tokens/sec',
+                    y='Avg Tokens/sec',
+                    title='Average Tokens per Second by Device',
+                    color='Avg Tokens/sec',
                     color_continuous_scale='viridis',
-                    range_color=[0, max_tokens]
+                    range_color=[0, max_tokens],
+                    hover_data=['Tests Completed', 'Min Tokens/sec', 'Max Tokens/sec']
                 )
                 fig_tokens.update_yaxes(range=[0, None])
                 st.plotly_chart(fig_tokens, use_container_width=True)
             
             with col2:
-                # TTFT comparison
-                # Calculate max value for proper color scaling
-                max_ttft = comparison_df['TTFT (ms)'].max()
+                # Average TTFT comparison
+                max_ttft = comparison_df['Avg TTFT (ms)'].max()
                 fig_ttft = px.bar(
                     comparison_df,
                     x='Device',
-                    y='TTFT (ms)',
-                    title='Time to First Token by Device',
-                    color='TTFT (ms)',
+                    y='Avg TTFT (ms)',
+                    title='Average Time to First Token by Device',
+                    color='Avg TTFT (ms)',
                     color_continuous_scale='plasma',
-                    range_color=[0, max_ttft]
+                    range_color=[0, max_ttft],
+                    hover_data=['Tests Completed', 'Avg Success Rate (%)']
                 )
                 fig_ttft.update_yaxes(range=[0, None])
                 st.plotly_chart(fig_ttft, use_container_width=True)
         
-        # Detailed results
-        st.subheader("🔍 Detailed Test Results")
+        # Detailed results by device
+        st.subheader("🔍 Detailed Results by Device")
         
-        for i, result in enumerate(st.session_state.results):
-            device_name = result['device_info']['device_name']
-            
-            with st.expander(f"📋 {device_name} - Test {i+1}"):
+        for device_name, data in device_aggregates.items():
+            with st.expander(f"📋 {device_name} - {data['test_count']} tests completed"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.write("**Test Configuration:**")
+                    st.write("**Device Summary:**")
                     st.json({
-                        'Model': result['test_config']['model'],
-                        'Prompt Length': result['test_config']['prompt_length'],
-                        'Iterations': result['test_config']['iterations'],
-                        'Warm-up': result['test_config']['warm_up']
+                        'Model': data['model'],
+                        'Total Tests': data['test_count'],
+                        'Avg Tokens/sec': f"{sum(data['tokens_per_sec']) / len(data['tokens_per_sec']):.2f}",
+                        'Min-Max Tokens/sec': f"{min(data['tokens_per_sec']):.2f} - {max(data['tokens_per_sec']):.2f}",
+                        'Avg Success Rate': f"{sum(data['success_rates']) / len(data['success_rates']):.1f}%"
                     })
                 
                 with col2:
-                    if result['results']['performance_stats']:
-                        st.write("**Performance Metrics:**")
-                        stats = result['results']['performance_stats']
-                        st.json({
-                            'Tokens/sec (avg)': f"{stats['tokens_per_second']['mean']:.2f}",
-                            'TTFT (avg)': f"{stats['ttft_ms']['mean']:.1f}ms",
-                            'Duration (avg)': f"{stats['total_duration_s']['mean']:.2f}s",
-                            'Success Rate': f"{result['results']['success_rate']:.1f}%"
-                        })
+                    st.write("**Performance Statistics:**")
+                    avg_tokens = sum(data['tokens_per_sec']) / len(data['tokens_per_sec'])
+                    std_dev = (sum((x - avg_tokens)**2 for x in data['tokens_per_sec']) / len(data['tokens_per_sec']))**0.5
+                    st.json({
+                        'Avg TTFT': f"{sum(data['ttft_ms']) / len(data['ttft_ms']):.1f}ms",
+                        'Avg Duration': f"{sum(data['total_duration_s']) / len(data['total_duration_s']):.2f}s",
+                        'Performance Variance': f"±{std_dev:.2f} tok/s",
+                        'Consistency Score': f"{(1 - std_dev/avg_tokens)*100:.1f}%" if avg_tokens > 0 else "N/A"
+                    })
                 
-                # System metrics visualization
-                if result['system_metrics']['samples']:
-                    st.write("**System Metrics During Test:**")
-                    fig_metrics = create_system_metrics_chart(result['system_metrics']['samples'])
+                # Find system metrics from one of the tests for this device
+                device_results = [r for r in st.session_state.results if r['device_info']['device_name'] == device_name]
+                if device_results and device_results[-1]['system_metrics']['samples']:
+                    st.write("**System Metrics (Latest Test):**")
+                    fig_metrics = create_system_metrics_chart(device_results[-1]['system_metrics']['samples'])
                     if fig_metrics:
                         st.plotly_chart(fig_metrics, use_container_width=True)
         
