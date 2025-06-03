@@ -82,11 +82,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Helper functions
-def load_enhanced_prompts(filename='app/enhanced_prompt_list.json'):
+def load_enhanced_prompts(prompt_list_path):
     """Load enhanced prompt categories from JSON file."""
     try:
-        if os.path.exists(filename):
-            with open(filename, 'r') as f:
+        if os.path.exists(prompt_list_path):
+            with open(prompt_list_path, 'r') as f:
                 return json.load(f)
     except (json.JSONDecodeError, FileNotFoundError) as e:
         st.error(f"Error loading enhanced prompts: {e}")
@@ -130,7 +130,7 @@ def create_system_metrics_chart(metrics_data):
             'relative_time': sample['relative_time'],
             'cpu_percent': sample['cpu']['overall_percent'],
             'memory_percent': sample['memory']['virtual']['percentage'],
-            'memory_used_mb': sample['memory']['virtual']['used_mb'],
+            'memory_used_gb': sample['memory']['virtual']['used_mb'] / 1024,  # Convert MB to GB
         }
         
         # Add GPU metrics if available
@@ -148,11 +148,12 @@ def create_system_metrics_chart(metrics_data):
     fig = make_subplots(
         rows=3, cols=2,
         subplot_titles=(
-            'CPU Utilization (%)', 'Memory Usage (%)',
-            'Memory Usage (MB)', 'GPU Compute (%)',
-            'GPU Memory (%)', 'GPU Temperature (°C)'
+            'CPU Utilization (%)', 'GPU Memory (%)',
+            'RAM Usage (GB)', 'GPU Compute (%)',
+            'RAM Usage (%)', 'GPU Temperature (°C)'
         ),
-        vertical_spacing=0.1
+        vertical_spacing=0.15,  # Increased spacing to prevent title overlap
+        horizontal_spacing=0.1
     )
     
     # CPU utilization
@@ -166,15 +167,22 @@ def create_system_metrics_chart(metrics_data):
     fig.add_trace(
         go.Scatter(x=df['relative_time'], y=df['memory_percent'], 
                    mode='lines', name='Memory %', line=dict(color='green')),
-        row=1, col=2
+        row=3, col=1
     )
     
-    # Memory usage in MB
+    # Memory usage in GB
     fig.add_trace(
-        go.Scatter(x=df['relative_time'], y=df['memory_used_mb'], 
-                   mode='lines', name='Memory MB', line=dict(color='orange')),
+        go.Scatter(x=df['relative_time'], y=df['memory_used_gb'], 
+                   mode='lines', name='Memory GB', line=dict(color='orange')),
         row=2, col=1
     )
+    # Set y-axis to show 0 to total RAM capacity (not just max used)
+    if metrics_data and 'memory' in metrics_data[0]:
+        total_ram_gb = metrics_data[0]['memory']['virtual']['total_mb'] / 1024
+        fig.update_yaxes(range=[0, total_ram_gb], row=2, col=1)
+    else:
+        # Fallback to max used + padding if total RAM not available
+        fig.update_yaxes(range=[0, df['memory_used_gb'].max() * 1.1], row=2, col=1)
     
     # GPU metrics
     gpu_cols = [col for col in df.columns if col.startswith('gpu_') and col.endswith('_compute')]
@@ -195,7 +203,7 @@ def create_system_metrics_chart(metrics_data):
             fig.add_trace(
                 go.Scatter(x=df['relative_time'], y=df[col], 
                            mode='lines', name=f'GPU {gpu_id} Mem', line=dict(color='purple')),
-                row=3, col=1
+                row=1, col=2
             )
     
     # GPU temperature
@@ -210,6 +218,42 @@ def create_system_metrics_chart(metrics_data):
             )
     
     fig.update_layout(height=800, showlegend=True, title="System Metrics During Test")
+    
+    # Update y-axes with specific ranges for different metric types
+    # CPU % and Memory % should be 0-100%
+    fig.update_yaxes(range=[0, 100], row=1, col=1)  # CPU %
+    fig.update_yaxes(range=[0, 100], row=1, col=2)  # GPU Memory %
+    
+    # RAM GB range is set directly after adding the trace above
+    
+    # GPU Compute % should be 0-100%
+    fig.update_yaxes(range=[0, 100], row=2, col=2)  # GPU Compute %
+    
+    # RAM % should be 0-100%
+    fig.update_yaxes(range=[0, 100], row=3, col=1)  # RAM %
+    
+    # GPU Temperature starts from 0, auto-scale upper bound
+    fig.update_yaxes(range=[0, None], row=3, col=2)  # GPU Temperature
+    
+    # Add proper axis titles for better readability
+    fig.update_xaxes(title_text="Time (seconds)", row=1, col=1)
+    fig.update_yaxes(title_text="CPU Usage (%)", row=1, col=1)
+    
+    fig.update_xaxes(title_text="Time (seconds)", row=1, col=2)
+    fig.update_yaxes(title_text="GPU Memory (%)", row=1, col=2)
+    
+    fig.update_xaxes(title_text="Time (seconds)", row=2, col=1)
+    fig.update_yaxes(title_text="RAM Usage (GB)", row=2, col=1)
+    
+    fig.update_xaxes(title_text="Time (seconds)", row=2, col=2)
+    fig.update_yaxes(title_text="GPU Compute (%)", row=2, col=2)
+    
+    fig.update_xaxes(title_text="Time (seconds)", row=3, col=1)
+    fig.update_yaxes(title_text="RAM Usage (%)", row=3, col=1)
+    
+    fig.update_xaxes(title_text="Time (seconds)", row=3, col=2)
+    fig.update_yaxes(title_text="GPU Temperature (°C)", row=3, col=2)
+    
     return fig
 
 # Initialize session state
@@ -222,7 +266,7 @@ if "selected_devices" not in st.session_state:
 if "models_info" not in st.session_state:
     st.session_state.models_info = {}
 if "enhanced_prompts" not in st.session_state:
-    st.session_state.enhanced_prompts = load_enhanced_prompts()
+    st.session_state.enhanced_prompts = load_enhanced_prompts(None)
 if "performance_test" not in st.session_state:
     st.session_state.performance_test = PerformanceTest()
 if "test_running" not in st.session_state:
@@ -241,14 +285,13 @@ with st.sidebar:
     
     # Test configuration
     st.subheader("Test Settings")
-    sampling_interval = st.slider("Metrics Sampling Interval (s)", 0.5, 5.0, 1.0, 0.5)
     port = st.number_input("Ollama API Port", value=11434, min_value=1, max_value=65535)
     
     # File paths
     st.subheader("Configuration Files")
-    ip_list_path = st.text_input("IP List Path", value="app/ip_list.json")
-    model_list_path = st.text_input("Model List Path", value="app/model_list.json")
-    prompt_list_path = st.text_input("Prompt List Path", value="app/prompt_list.json")
+    ip_list_path = st.text_input("IP List Path", value="ip_list.json", key="enhanced_ip_list_path")
+    model_list_path = st.text_input("Model List Path", value="model_list.json", key="enhanced_model_list_path")
+    prompt_list_path = st.text_input("Prompt List Path", value="prompt_list.json", key="enhanced_prompt_list_path")
     
     # Load devices
     if st.button("🔄 Load Devices"):
@@ -283,8 +326,8 @@ with tab1:
         st.subheader("Add Devices")
         
         # Manual IP entry
-        manual_ip = st.text_input("Manual IP Address", placeholder="192.168.1.100")
-        manual_name = st.text_input("Device Name (optional)", placeholder="Custom Device")
+        manual_ip = st.text_input("Manual IP Address", placeholder="192.168.1.100", key="enhanced_manual_ip")
+        manual_name = st.text_input("Device Name (optional)", placeholder="Custom Device", key="enhanced_manual_name")
         
         if st.button("➕ Add Manual IP") and manual_ip:
             if manual_ip not in [item["ip"] for item in st.session_state.selected_devices]:
@@ -445,8 +488,8 @@ with tab2:
             col1, col2 = st.columns(2)
             
             with col1:
-                manual_model = st.text_input("Model Name", placeholder="llama3.2:3b")
-                use_model_list = st.checkbox("Use Model List File")
+                manual_model = st.text_input("Model Name", placeholder="llama3.2:3b", key="enhanced_manual_model")
+                use_model_list = st.checkbox("Use Model List File", key="enhanced_use_model_list")
             
             with col2:
                 if use_model_list:
@@ -549,20 +592,40 @@ with tab3:
             # Model selection
             available_models = getattr(st.session_state, 'available_models', [])
             if available_models:
-                selected_model = st.selectbox("Select Model", options=available_models)
+                selected_model = st.selectbox("Select Model", options=available_models, key="enhanced_model_select")
             else:
-                selected_model = st.text_input("Model Name", placeholder="llama3.2:3b")
+                selected_model = st.text_input("Model Name", placeholder="llama3.2:3b", key="enhanced_test_model_name")
             
             # Test settings
-            iterations = st.number_input("Number of Iterations", min_value=1, max_value=100, value=3)
-            warm_up = st.checkbox("Enable Warm-up Run", value=True)
-            timeout_seconds = st.number_input("Timeout (seconds)", min_value=30, max_value=600, value=300)
+            iterations = st.number_input("Number of Iterations", min_value=1, max_value=100, value=3, key="enhanced_iterations")
+            warm_up = st.checkbox("Enable Warm-up Run", value=True, key="enhanced_warm_up")
+            timeout_seconds = st.number_input("Timeout (seconds)", min_value=30, max_value=600, value=300, key="enhanced_timeout")
         
         with col2:
             st.subheader("📝 Prompt Configuration")
             
+            # Add refresh button for enhanced prompts
+            col_refresh1, col_refresh2 = st.columns([1, 1])
+            
+            with col_refresh1:
+                if st.button("🔄 Refresh Prompt List"):
+                    st.session_state.enhanced_prompts = load_enhanced_prompts(prompt_list_path)
+                    if st.session_state.enhanced_prompts:
+                        st.success("✅ Enhanced prompts reloaded successfully!")
+                    else:
+                        st.error("❌ Failed to load enhanced prompts")
+                    st.rerun()
+            
+            with col_refresh2:
+                if st.session_state.enhanced_prompts:
+                    st.metric("Categories", len(st.session_state.enhanced_prompts.get('prompt_categories', {})))
+                else:
+                    st.metric("Categories", 0)
+            
             # Enhanced prompt selection
             if st.session_state.enhanced_prompts:
+                st.success(f"✅ Enhanced prompts loaded: {len(st.session_state.enhanced_prompts.get('prompt_categories', {}))} categories, {len(st.session_state.enhanced_prompts.get('test_configurations', {}))} test configurations")
+                
                 prompt_source = st.radio(
                     "Prompt Source",
                     ["Single Prompt", "Test Configuration", "Custom Selection"],
@@ -573,58 +636,71 @@ with tab3:
                     prompt_text = st.text_area(
                         "Enter Prompt",
                         height=150,
-                        placeholder="Write your test prompt here..."
+                        placeholder="Write your test prompt here...",
+                        key="enhanced_single_prompt"
                     )
                     test_prompts = [prompt_text] if prompt_text else []
                 
                 elif prompt_source == "Test Configuration":
                     test_configs = st.session_state.enhanced_prompts.get('test_configurations', {})
                     
-                    selected_config = st.selectbox(
-                        "Select Test Configuration",
-                        options=list(test_configs.keys()),
-                        format_func=lambda x: f"{x}: {test_configs[x]['description']}"
-                    )
-                    
-                    if selected_config:
-                        config = test_configs[selected_config]
-                        st.info(f"**{config['description']}**\nCategories: {', '.join(config['categories'])}")
-                        
-                        test_prompts = get_prompts_by_category(
-                            st.session_state.enhanced_prompts,
-                            config['categories'],
-                            config.get('sample_size')
+                    if test_configs:
+                        selected_config = st.selectbox(
+                            "Select Test Configuration",
+                            options=list(test_configs.keys()),
+                            format_func=lambda x: f"{x}: {test_configs[x]['description']}",
+                            key="enhanced_test_config_select"
                         )
                         
-                        st.write(f"📊 {len(test_prompts)} prompts selected")
+                        if selected_config:
+                            config = test_configs[selected_config]
+                            st.info(f"**{config['description']}**\nCategories: {', '.join(config['categories'])}")
+                            
+                            test_prompts = get_prompts_by_category(
+                                st.session_state.enhanced_prompts,
+                                config['categories'],
+                                config.get('sample_size')
+                            )
+                            
+                            st.write(f"📊 {len(test_prompts)} prompts selected from {len(config['categories'])} categories")
+                    else:
+                        st.warning("No test configurations found in enhanced_prompt_list.json")
+                        test_prompts = []
                 
                 else:  # Custom Selection
                     categories = st.session_state.enhanced_prompts.get('prompt_categories', {})
                     
-                    selected_categories = st.multiselect(
-                        "Select Categories",
-                        options=list(categories.keys()),
-                        format_func=lambda x: f"{x}: {categories[x]['description']}"
-                    )
-                    
-                    sample_size = st.number_input(
-                        "Prompts per Category",
-                        min_value=1,
-                        max_value=10,
-                        value=3
-                    )
-                    
-                    test_prompts = get_prompts_by_category(
-                        st.session_state.enhanced_prompts,
-                        selected_categories,
-                        sample_size
-                    )
-                    
-                    if test_prompts:
-                        st.write(f"📊 {len(test_prompts)} prompts selected")
+                    if categories:
+                        selected_categories = st.multiselect(
+                            "Select Categories",
+                            options=list(categories.keys()),
+                            format_func=lambda x: f"{x}: {categories[x]['description']} ({len(categories[x].get('prompts', []))} prompts)",
+                            key="enhanced_category_select"
+                        )
+                        
+                        sample_size = st.number_input(
+                            "Prompts per Category",
+                            min_value=1,
+                            max_value=10,
+                            value=3,
+                            key="enhanced_sample_size"
+                        )
+                        
+                        test_prompts = get_prompts_by_category(
+                            st.session_state.enhanced_prompts,
+                            selected_categories,
+                            sample_size
+                        )
+                        
+                        if test_prompts:
+                            st.write(f"📊 {len(test_prompts)} prompts selected from {len(selected_categories)} categories")
+                    else:
+                        st.warning("No prompt categories found in enhanced_prompt_list.json")
+                        test_prompts = []
             else:
                 # Fallback to original prompt selection
-                prompt_text = st.text_area("Enter Prompt", height=150)
+                st.warning("⚠️ Enhanced prompts not loaded. Please check app/enhanced_prompt_list.json file.")
+                prompt_text = st.text_area("Enter Prompt", height=150, key="enhanced_fallback_prompt")
                 test_prompts = [prompt_text] if prompt_text else []
         
         # Advanced settings
@@ -633,27 +709,27 @@ with tab3:
             
             with col1:
                 st.subheader("Metrics Collection")
-                enable_gpu_monitoring = st.checkbox("Enable GPU Monitoring", value=True)
-                enable_detailed_cpu = st.checkbox("Detailed CPU Metrics", value=True)
-                custom_sampling = st.checkbox("Custom Sampling Interval")
+                enable_gpu_monitoring = st.checkbox("Enable GPU Monitoring", value=True, key="enhanced_gpu_monitoring")
+                enable_detailed_cpu = st.checkbox("Detailed CPU Metrics", value=True, key="enhanced_detailed_cpu")
                 
-                if custom_sampling:
-                    sampling_interval = st.slider(
+                sampling_interval = st.slider(
                         "Sampling Interval (s)",
                         min_value=0.1,
                         max_value=10.0,
                         value=1.0,
-                        step=0.1
-                    )
+                        step=0.5,
+                        key="enhanced_sampling_interval"
+                )
             
             with col2:
                 st.subheader("Export Options")
                 export_format = st.selectbox(
                     "Export Format",
-                    ["JSON", "CSV", "Excel"]
+                    ["JSON", "CSV", "Excel"],
+                    key="enhanced_export_format"
                 )
-                include_raw_metrics = st.checkbox("Include Raw Metrics", value=True)
-                include_system_info = st.checkbox("Include System Info", value=True)
+                include_raw_metrics = st.checkbox("Include Raw Metrics", value=True, key="enhanced_include_raw")
+                include_system_info = st.checkbox("Include System Info", value=True, key="enhanced_include_system")
         
         # Test execution
         st.subheader("🚀 Test Execution")
@@ -808,26 +884,34 @@ with tab4:
             
             with col1:
                 # Tokens per second comparison
+                # Calculate max value for proper color scaling
+                max_tokens = comparison_df['Tokens/sec'].max()
                 fig_tokens = px.bar(
                     comparison_df,
                     x='Device',
                     y='Tokens/sec',
                     title='Tokens per Second by Device',
                     color='Tokens/sec',
-                    color_continuous_scale='viridis'
+                    color_continuous_scale='viridis',
+                    range_color=[0, max_tokens]
                 )
+                fig_tokens.update_yaxes(range=[0, None])
                 st.plotly_chart(fig_tokens, use_container_width=True)
             
             with col2:
                 # TTFT comparison
+                # Calculate max value for proper color scaling
+                max_ttft = comparison_df['TTFT (ms)'].max()
                 fig_ttft = px.bar(
                     comparison_df,
                     x='Device',
                     y='TTFT (ms)',
                     title='Time to First Token by Device',
                     color='TTFT (ms)',
-                    color_continuous_scale='plasma'
+                    color_continuous_scale='plasma',
+                    range_color=[0, max_ttft]
                 )
+                fig_ttft.update_yaxes(range=[0, None])
                 st.plotly_chart(fig_ttft, use_container_width=True)
         
         # Detailed results
@@ -904,191 +988,197 @@ with tab4:
                 st.rerun()
 
 # Tab 5: Advanced Analytics
-with tab5:
-    st.header("📈 Advanced Analytics")
+# with tab5:
+#     st.header("📈 Advanced Analytics")
     
-    if not st.session_state.results:
-        st.info("🔍 No test results available for analysis.")
-    else:
-        # Performance trends and analysis
-        st.subheader("🎯 Performance Analysis")
+#     if not st.session_state.results:
+#         st.info("🔍 No test results available for analysis.")
+#     else:
+#         # Performance trends and analysis
+#         st.subheader("🎯 Performance Analysis")
         
-        # Aggregate all performance data
-        all_performance_data = []
-        for result in st.session_state.results:
-            if result['results']['performance_stats']:
-                device_name = result['device_info']['device_name']
-                stats = result['results']['performance_stats']
+#         # Aggregate all performance data
+#         all_performance_data = []
+#         for result in st.session_state.results:
+#             if result['results']['performance_stats']:
+#                 device_name = result['device_info']['device_name']
+#                 stats = result['results']['performance_stats']
                 
-                all_performance_data.append({
-                    'Device': device_name,
-                    'Model': result['test_config']['model'],
-                    'Prompt_Length': result['test_config']['prompt_length'],
-                    'Tokens_Per_Second': stats['tokens_per_second']['mean'],
-                    'TTFT_ms': stats['ttft_ms']['mean'],
-                    'Total_Duration_s': stats['total_duration_s']['mean'],
-                    'Success_Rate': result['results']['success_rate']
-                })
+#                 all_performance_data.append({
+#                     'Device': device_name,
+#                     'Model': result['test_config']['model'],
+#                     'Prompt_Length': result['test_config']['prompt_length'],
+#                     'Tokens_Per_Second': stats['tokens_per_second']['mean'],
+#                     'TTFT_ms': stats['ttft_ms']['mean'],
+#                     'Total_Duration_s': stats['total_duration_s']['mean'],
+#                     'Success_Rate': result['results']['success_rate']
+#                 })
         
-        if all_performance_data:
-            perf_df = pd.DataFrame(all_performance_data)
+#         if all_performance_data:
+#             perf_df = pd.DataFrame(all_performance_data)
             
-            # Performance correlation analysis
-            col1, col2 = st.columns(2)
+#             # Performance correlation analysis
+#             col1, col2 = st.columns(2)
             
-            with col1:
-                # Tokens/sec vs Prompt Length
-                fig_scatter = px.scatter(
-                    perf_df,
-                    x='Prompt_Length',
-                    y='Tokens_Per_Second',
-                    color='Device',
-                    size='Success_Rate',
-                    title='Tokens/sec vs Prompt Length',
-                    hover_data=['Model', 'TTFT_ms']
-                )
-                st.plotly_chart(fig_scatter, use_container_width=True)
+#             with col1:
+#                 # Tokens/sec vs Prompt Length
+#                 fig_scatter = px.scatter(
+#                     perf_df,
+#                     x='Prompt_Length',
+#                     y='Tokens_Per_Second',
+#                     color='Device',
+#                     size='Success_Rate',
+#                     title='Tokens/sec vs Prompt Length',
+#                     hover_data=['Model', 'TTFT_ms']
+#                 )
+#                 fig_scatter.update_xaxes(range=[0, None])
+#                 fig_scatter.update_yaxes(range=[0, None])
+#                 st.plotly_chart(fig_scatter, use_container_width=True)
             
-            with col2:
-                # Performance distribution
-                fig_box = px.box(
-                    perf_df,
-                    x='Device',
-                    y='Tokens_Per_Second',
-                    title='Tokens/sec Distribution by Device'
-                )
-                st.plotly_chart(fig_box, use_container_width=True)
+#             with col2:
+#                 # Performance distribution
+#                 fig_box = px.box(
+#                     perf_df,
+#                     x='Device',
+#                     y='Tokens_Per_Second',
+#                     title='Tokens/sec Distribution by Device'
+#                 )
+#                 fig_box.update_yaxes(range=[0, None])
+#                 st.plotly_chart(fig_box, use_container_width=True)
             
-            # Resource efficiency analysis
-            st.subheader("⚡ Resource Efficiency")
+#             # Resource efficiency analysis
+#             st.subheader("⚡ Resource Efficiency")
             
-            # Calculate efficiency metrics
-            efficiency_data = []
-            for result in st.session_state.results:
-                if result['system_metrics']['samples'] and result['results']['performance_stats']:
-                    samples = result['system_metrics']['samples']
+#             # Calculate efficiency metrics
+#             efficiency_data = []
+#             for result in st.session_state.results:
+#                 if result['system_metrics']['samples'] and result['results']['performance_stats']:
+#                     samples = result['system_metrics']['samples']
                     
-                    # Calculate average resource usage
-                    avg_cpu = sum(s['cpu']['overall_percent'] for s in samples) / len(samples)
-                    avg_memory = sum(s['memory']['virtual']['percentage'] for s in samples) / len(samples)
+#                     # Calculate average resource usage
+#                     avg_cpu = sum(s['cpu']['overall_percent'] for s in samples) / len(samples)
+#                     avg_memory = sum(s['memory']['virtual']['percentage'] for s in samples) / len(samples)
                     
-                    # GPU metrics if available
-                    avg_gpu = 0
-                    if samples[0].get('gpu'):
-                        gpu_usage = []
-                        for sample in samples:
-                            if sample.get('gpu'):
-                                for gpu in sample['gpu']:
-                                    gpu_usage.append(gpu['utilization']['compute_percent'])
-                        avg_gpu = sum(gpu_usage) / len(gpu_usage) if gpu_usage else 0
+#                     # GPU metrics if available
+#                     avg_gpu = 0
+#                     if samples[0].get('gpu'):
+#                         gpu_usage = []
+#                         for sample in samples:
+#                             if sample.get('gpu'):
+#                                 for gpu in sample['gpu']:
+#                                     gpu_usage.append(gpu['utilization']['compute_percent'])
+#                         avg_gpu = sum(gpu_usage) / len(gpu_usage) if gpu_usage else 0
                     
-                    tokens_per_sec = result['results']['performance_stats']['tokens_per_second']['mean']
+#                     tokens_per_sec = result['results']['performance_stats']['tokens_per_second']['mean']
                     
-                    efficiency_data.append({
-                        'Device': result['device_info']['device_name'],
-                        'Avg_CPU_%': avg_cpu,
-                        'Avg_Memory_%': avg_memory,
-                        'Avg_GPU_%': avg_gpu,
-                        'Tokens_Per_Second': tokens_per_sec,
-                        'Efficiency_Score': tokens_per_sec / (avg_cpu + avg_memory + avg_gpu + 1)  # +1 to avoid division by zero
-                    })
+#                     efficiency_data.append({
+#                         'Device': result['device_info']['device_name'],
+#                         'Avg_CPU_%': avg_cpu,
+#                         'Avg_Memory_%': avg_memory,
+#                         'Avg_GPU_%': avg_gpu,
+#                         'Tokens_Per_Second': tokens_per_sec,
+#                         'Efficiency_Score': tokens_per_sec / (avg_cpu + avg_memory + avg_gpu + 1)  # +1 to avoid division by zero
+#                     })
             
-            if efficiency_data:
-                eff_df = pd.DataFrame(efficiency_data)
+#             if efficiency_data:
+#                 eff_df = pd.DataFrame(efficiency_data)
                 
-                col1, col2 = st.columns(2)
+#                 col1, col2 = st.columns(2)
                 
-                with col1:
-                    # Resource utilization
-                    fig_resource = px.scatter(
-                        eff_df,
-                        x='Avg_CPU_%',
-                        y='Tokens_Per_Second',
-                        color='Device',
-                        size='Efficiency_Score',
-                        title='Performance vs CPU Utilization'
-                    )
-                    st.plotly_chart(fig_resource, use_container_width=True)
+#                 with col1:
+#                     # Resource utilization
+#                     fig_resource = px.scatter(
+#                         eff_df,
+#                         x='Avg_CPU_%',
+#                         y='Tokens_Per_Second',
+#                         color='Device',
+#                         size='Efficiency_Score',
+#                         title='Performance vs CPU Utilization'
+#                     )
+#                     fig_resource.update_xaxes(range=[0, None])
+#                     fig_resource.update_yaxes(range=[0, None])
+#                     st.plotly_chart(fig_resource, use_container_width=True)
                 
-                with col2:
-                    # Efficiency ranking
-                    fig_efficiency = px.bar(
-                        eff_df.sort_values('Efficiency_Score', ascending=True),
-                        x='Efficiency_Score',
-                        y='Device',
-                        orientation='h',
-                        title='Device Efficiency Ranking'
-                    )
-                    st.plotly_chart(fig_efficiency, use_container_width=True)
+#                 with col2:
+#                     # Efficiency ranking
+#                     fig_efficiency = px.bar(
+#                         eff_df.sort_values('Efficiency_Score', ascending=True),
+#                         x='Efficiency_Score',
+#                         y='Device',
+#                         orientation='h',
+#                         title='Device Efficiency Ranking'
+#                     )
+#                     fig_efficiency.update_xaxes(range=[0, None])
+#                     st.plotly_chart(fig_efficiency, use_container_width=True)
             
-            # Recommendations
-            st.subheader("💡 Performance Recommendations")
+#             # Recommendations
+#             st.subheader("💡 Performance Recommendations")
             
-            # Find best and worst performers
-            best_device = perf_df.loc[perf_df['Tokens_Per_Second'].idxmax(), 'Device']
-            worst_device = perf_df.loc[perf_df['Tokens_Per_Second'].idxmin(), 'Device']
+#             # Find best and worst performers
+#             best_device = perf_df.loc[perf_df['Tokens_Per_Second'].idxmax(), 'Device']
+#             worst_device = perf_df.loc[perf_df['Tokens_Per_Second'].idxmin(), 'Device']
             
-            best_performance = perf_df['Tokens_Per_Second'].max()
-            worst_performance = perf_df['Tokens_Per_Second'].min()
+#             best_performance = perf_df['Tokens_Per_Second'].max()
+#             worst_performance = perf_df['Tokens_Per_Second'].min()
             
-            col1, col2, col3 = st.columns(3)
+#             col1, col2, col3 = st.columns(3)
             
-            with col1:
-                st.markdown(f"""
-                <div class="success-card">
-                    <h4>🏆 Best Performer</h4>
-                    <p><strong>{best_device}</strong></p>
-                    <p>{best_performance:.1f} tokens/sec</p>
-                </div>
-                """, unsafe_allow_html=True)
+#             with col1:
+#                 st.markdown(f"""
+#                 <div class="success-card">
+#                     <h4>🏆 Best Performer</h4>
+#                     <p><strong>{best_device}</strong></p>
+#                     <p>{best_performance:.1f} tokens/sec</p>
+#                 </div>
+#                 """, unsafe_allow_html=True)
             
-            with col2:
-                st.markdown(f"""
-                <div class="warning-card">
-                    <h4>⚠️ Needs Improvement</h4>
-                    <p><strong>{worst_device}</strong></p>
-                    <p>{worst_performance:.1f} tokens/sec</p>
-                </div>
-                """, unsafe_allow_html=True)
+#             with col2:
+#                 st.markdown(f"""
+#                 <div class="warning-card">
+#                     <h4>⚠️ Needs Improvement</h4>
+#                     <p><strong>{worst_device}</strong></p>
+#                     <p>{worst_performance:.1f} tokens/sec</p>
+#                 </div>
+#                 """, unsafe_allow_html=True)
             
-            with col3:
-                improvement_potential = ((best_performance - worst_performance) / worst_performance) * 100
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h4>📊 Improvement Potential</h4>
-                    <p><strong>{improvement_potential:.1f}%</strong></p>
-                    <p>Performance gap</p>
-                </div>
-                """, unsafe_allow_html=True)
+#             with col3:
+#                 improvement_potential = ((best_performance - worst_performance) / worst_performance) * 100
+#                 st.markdown(f"""
+#                 <div class="metric-card">
+#                     <h4>📊 Improvement Potential</h4>
+#                     <p><strong>{improvement_potential:.1f}%</strong></p>
+#                     <p>Performance gap</p>
+#                 </div>
+#                 """, unsafe_allow_html=True)
             
-            # Detailed recommendations
-            st.write("**Optimization Suggestions:**")
+#             # Detailed recommendations
+#             st.write("**Optimization Suggestions:**")
             
-            recommendations = []
+#             recommendations = []
             
-            if efficiency_data:
-                # Find devices with high resource usage but low performance
-                for item in efficiency_data:
-                    if item['Avg_CPU_%'] > 80 and item['Tokens_Per_Second'] < perf_df['Tokens_Per_Second'].median():
-                        recommendations.append(f"🔧 **{item['Device']}**: High CPU usage ({item['Avg_CPU_%']:.1f}%) with low performance. Consider CPU optimization or model size reduction.")
+#             if efficiency_data:
+#                 # Find devices with high resource usage but low performance
+#                 for item in efficiency_data:
+#                     if item['Avg_CPU_%'] > 80 and item['Tokens_Per_Second'] < perf_df['Tokens_Per_Second'].median():
+#                         recommendations.append(f"🔧 **{item['Device']}**: High CPU usage ({item['Avg_CPU_%']:.1f}%) with low performance. Consider CPU optimization or model size reduction.")
                     
-                    if item['Avg_Memory_%'] > 90:
-                        recommendations.append(f"💾 **{item['Device']}**: High memory usage ({item['Avg_Memory_%']:.1f}%). Consider increasing RAM or using smaller models.")
+#                     if item['Avg_Memory_%'] > 90:
+#                         recommendations.append(f"💾 **{item['Device']}**: High memory usage ({item['Avg_Memory_%']:.1f}%). Consider increasing RAM or using smaller models.")
                     
-                    if item['Avg_GPU_%'] > 95 and item['Tokens_Per_Second'] < perf_df['Tokens_Per_Second'].median():
-                        recommendations.append(f"🎮 **{item['Device']}**: GPU bottleneck detected. Consider GPU memory optimization or batch size tuning.")
+#                     if item['Avg_GPU_%'] > 95 and item['Tokens_Per_Second'] < perf_df['Tokens_Per_Second'].median():
+#                         recommendations.append(f"🎮 **{item['Device']}**: GPU bottleneck detected. Consider GPU memory optimization or batch size tuning.")
             
-            # General recommendations based on performance patterns
-            prompt_perf = perf_df.groupby('Prompt_Length')['Tokens_Per_Second'].mean()
-            if len(prompt_perf) > 1:
-                if prompt_perf.iloc[-1] < prompt_perf.iloc[0] * 0.5:  # Performance drops significantly with longer prompts
-                    recommendations.append("📝 **Prompt Optimization**: Performance degrades significantly with longer prompts. Consider prompt engineering or chunking strategies.")
+#             # General recommendations based on performance patterns
+#             prompt_perf = perf_df.groupby('Prompt_Length')['Tokens_Per_Second'].mean()
+#             if len(prompt_perf) > 1:
+#                 if prompt_perf.iloc[-1] < prompt_perf.iloc[0] * 0.5:  # Performance drops significantly with longer prompts
+#                     recommendations.append("📝 **Prompt Optimization**: Performance degrades significantly with longer prompts. Consider prompt engineering or chunking strategies.")
             
-            if not recommendations:
-                recommendations.append("✅ **Overall Performance**: All devices are performing within expected parameters.")
+#             if not recommendations:
+#                 recommendations.append("✅ **Overall Performance**: All devices are performing within expected parameters.")
             
-            for rec in recommendations:
-                st.markdown(f"• {rec}")
+#             for rec in recommendations:
+#                 st.markdown(f"• {rec}")
 
 # Footer
 st.markdown("---")
