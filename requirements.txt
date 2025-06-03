@@ -2,3 +2,5 @@ requests
 streamlit
 pandas
 plotly
+psutil
+nvidia-ml-py

@@ -1,0 +1,101 @@
+{
+    "prompt_categories": {
+        "short": {
+            "description": "Short prompts (< 50 tokens) for quick response testing",
+            "prompts": [
+                "Hello, how are you?",
+                "What is AI?",
+                "Explain photosynthesis briefly.",
+                "Write a haiku about technology.",
+                "What is machine learning?",
+                "Name three programming languages.",
+                "How does the internet work?",
+                "What is quantum computing?",
+                "Define artificial intelligence.",
+                "List benefits of renewable energy."
+            ]
+        },
+        "medium": {
+            "description": "Medium prompts (50-200 tokens) for standard performance testing",
+            "prompts": [
+                "Explain the concept of quantum computing in simple terms, including its potential applications and current limitations.",
+                "Write a detailed comparison between machine learning and traditional programming approaches, highlighting key differences.",
+                "Describe the process of photosynthesis step by step, including the role of chlorophyll and the chemical reactions involved.",
+                "What are the ethical considerations surrounding autonomous vehicles, particularly regarding decision-making in emergency situations?",
+                "Compare and contrast renewable energy sources like solar, wind, and hydroelectric power in terms of efficiency and environmental impact.",
+                "Explain how blockchain technology works, including concepts like distributed ledgers, consensus mechanisms, and cryptographic hashing.",
+                "Describe three innovative ways to improve energy efficiency in modern buildings, considering both technological and design approaches.",
+                "What are the major challenges in natural language processing today, and how are researchers working to address them?",
+                "Analyze how climate change might affect global food security over the next three decades, considering agricultural adaptation strategies.",
+                "Explain the principles behind neural networks and deep learning, including how they differ from traditional algorithms."
+            ]
+        },
+        "long": {
+            "description": "Long prompts (200+ tokens) for comprehensive testing and stress testing",
+            "prompts": [
+                "Write a comprehensive analysis of the impact of artificial intelligence on the job market over the next two decades. Consider both the displacement of traditional roles and the creation of new employment opportunities. Discuss specific industries that will be most affected, strategies for workforce retraining, and policy recommendations for governments to manage this transition. Include examples of successful AI implementation that has complemented rather than replaced human workers, and analyze the skills that will remain uniquely human in an AI-dominated workplace.",
+                "Explain the complete process of developing a machine learning model from data collection to deployment. Start with identifying the problem and gathering appropriate datasets, then cover data preprocessing, feature engineering, model selection, training procedures, validation techniques, hyperparameter tuning, and performance evaluation metrics. Discuss common pitfalls like overfitting, data leakage, and bias in datasets. Finally, address deployment considerations including model monitoring, updating, and maintaining performance in production environments.",
+                "Analyze the complex relationship between technology advancement and environmental sustainability. Examine how emerging technologies like IoT, AI, and renewable energy systems can contribute to environmental protection, while also considering the environmental costs of manufacturing electronic devices, data center energy consumption, and electronic waste. Propose a framework for evaluating the true environmental impact of new technologies, including lifecycle assessments and sustainable design principles that could guide future development.",
+                "Discuss the evolution of cybersecurity threats in the digital age and propose comprehensive strategies for protecting both individual users and organizations. Cover the progression from simple viruses to sophisticated nation-state attacks, the rise of ransomware and social engineering, and emerging threats in IoT and cloud computing environments. Detail multi-layered defense strategies including technical solutions, employee training, incident response planning, and the role of artificial intelligence in both attack and defense scenarios.",
+                "Examine the potential of space exploration and colonization as solutions to Earth's resource limitations and growing population. Analyze the technological challenges of long-term space habitation, including life support systems, radiation protection, sustainable food production, and psychological factors. Discuss the economics of space-based resource extraction, the legal frameworks needed for space governance, and the ethical implications of human expansion beyond Earth. Consider both near-term objectives like lunar bases and long-term goals such as Mars colonization."
+            ]
+        },
+        "complex_reasoning": {
+            "description": "Prompts requiring complex reasoning and multi-step problem solving",
+            "prompts": [
+                "You are planning a sustainable city for 100,000 people from scratch. Design the city's infrastructure considering energy systems, transportation, waste management, water supply, housing, and green spaces. Calculate approximate resource requirements and explain your design choices. Consider climate resilience, technological integration, and social equity in your planning.",
+                "Analyze a hypothetical scenario where a new breakthrough in quantum computing makes current encryption methods obsolete overnight. Trace the potential consequences across banking, communications, government, and personal privacy. Propose a transition strategy that minimizes disruption while ensuring security. Consider technical, economic, and social factors.",
+                "Design an educational curriculum for a world where AI handles most routine cognitive tasks. What skills should humans focus on developing? How would assessment methods change? Consider different age groups from elementary through university level, and propose specific learning approaches that leverage AI as a tool while developing uniquely human capabilities.",
+                "You discover a way to efficiently convert atmospheric CO2 into useful materials at scale. Analyze the global implications: economic disruption to fossil fuel industries, geopolitical shifts, implementation challenges, and potential unintended consequences. Develop a rollout strategy that considers stakeholder interests and minimizes negative impacts.",
+                "Propose a comprehensive strategy for achieving net-zero carbon emissions for a medium-sized country within 15 years. Consider all sectors: energy, transportation, industry, agriculture, and buildings. Include specific technologies, policy measures, financing mechanisms, and social adaptation strategies. Address potential obstacles and trade-offs."
+            ]
+        },
+        "creative": {
+            "description": "Creative and open-ended prompts for testing model creativity and flexibility",
+            "prompts": [
+                "Write a story about a world where plants have developed consciousness and can communicate with humans. Explore the societal changes and ethical dilemmas this would create.",
+                "Imagine you're designing a new form of entertainment for the year 2050. Consider emerging technologies, changing social patterns, and new forms of human interaction. Describe your concept in detail.",
+                "Create a dialogue between a time traveler from 1920 and a person from 2024 discussing how technology has changed human relationships and society.",
+                "Design a new musical instrument that doesn't exist yet. Describe how it works, what it sounds like, and what kind of music could be created with it.",
+                "Write a persuasive speech that a tree might give to convince humans to take better care of forests. Make it emotional and compelling while being scientifically accurate."
+            ]
+        },
+        "technical": {
+            "description": "Technical prompts for testing domain-specific knowledge and reasoning",
+            "prompts": [
+                "Explain the implementation of a distributed hash table (DHT) in peer-to-peer networks. Include key concepts like consistent hashing, node joining/leaving procedures, and fault tolerance mechanisms.",
+                "Design a microservices architecture for a high-traffic e-commerce platform. Consider service decomposition, inter-service communication, data consistency, and scalability patterns.",
+                "Analyze the trade-offs between different consensus algorithms in blockchain systems (Proof of Work, Proof of Stake, Practical Byzantine Fault Tolerance). Include performance, security, and energy considerations.",
+                "Explain the mathematical foundations of neural network backpropagation, including the chain rule application and gradient descent optimization. Provide a step-by-step derivation.",
+                "Design a fault-tolerant distributed database system that maintains ACID properties across multiple data centers. Address partition tolerance, consistency models, and recovery mechanisms."
+            ]
+        }
+    },
+    "test_configurations": {
+        "quick_test": {
+            "description": "Quick performance check using short prompts",
+            "categories": ["short"],
+            "sample_size": 3
+        },
+        "standard_test": {
+            "description": "Standard performance evaluation using mixed prompt lengths",
+            "categories": ["short", "medium"],
+            "sample_size": 5
+        },
+        "comprehensive_test": {
+            "description": "Comprehensive evaluation including all prompt types",
+            "categories": ["short", "medium", "long", "complex_reasoning"],
+            "sample_size": 8
+        },
+        "stress_test": {
+            "description": "Stress testing with long and complex prompts",
+            "categories": ["long", "complex_reasoning", "technical"],
+            "sample_size": 5
+        },
+        "creativity_test": {
+            "description": "Testing creative and flexible responses",
+            "categories": ["creative"],
+            "sample_size": 3
+        }
+    }
+} 
